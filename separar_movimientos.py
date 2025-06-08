@@ -4,83 +4,104 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.styles.numbers import FORMAT_CURRENCY_USD_SIMPLE
 
-# Parámetro del mes
-mes = 'mayo'
-
-# Verificar que la carpeta base "Individuales" existe
+# Directorios
+crudos_dir = 'Crudos'
 base_dir = 'Individuales'
+
+# Verificación de carpeta base
 if not os.path.isdir(base_dir):
-    raise FileNotFoundError(f'La carpeta base "{base_dir}" no existe. Por favor, créala manualmente antes de continuar.')
+    raise FileNotFoundError(f'La carpeta base "{base_dir}" no existe. Por favor, créala manualmente.')
 
-# Verificar si ya existe la carpeta del mes
-output_dir = os.path.join(base_dir, mes)
-if os.path.exists(output_dir):
-    print(f'La carpeta "{output_dir}" ya existe. El trabajo de "{mes}" ya fue realizado.')
-    exit()
+# Obtener archivos crudos
+archivos_crudos = [f for f in os.listdir(crudos_dir) if f.startswith("movimientos_") and f.endswith(".csv")]
+meses_creados = []
 
-# Crear carpeta del mes
-os.makedirs(output_dir)
+# Procesar cada archivo mensual
+for archivo in archivos_crudos:
+    partes = archivo.replace('.csv', '').split('_')
+    if len(partes) < 3:
+        continue
 
-# Rutas
-input_path = 'Crudos/dataset_movimientos_mayo2025_limpio.csv'
+    mes = partes[1]
+    output_dir = os.path.join(base_dir, mes)
 
-# Leer el archivo CSV
-df = pd.read_csv(input_path)
-nombres_unicos = df['Nombre'].unique()
+    if os.path.exists(output_dir):
+        continue
 
-# Exportar y aplicar formato
-for nombre in nombres_unicos:
-    df_persona = df[df['Nombre'] == nombre]
-    nombre_archivo = f"{nombre.replace(' ', '_')}_{mes}.xlsx"
-    ruta_archivo = os.path.join(output_dir, nombre_archivo)
+    os.makedirs(output_dir)
+    meses_creados.append(mes)
 
-    # Guardar como Excel
-    df_persona.to_excel(ruta_archivo, index=False)
+    input_path = os.path.join(crudos_dir, archivo)
+    df = pd.read_csv(input_path)
+    df["Fecha"] = pd.to_datetime(df["Fecha"], dayfirst=True, errors="coerce")  # Conversión segura de fecha
 
-    # Abrir el archivo para aplicar formato
-    wb = load_workbook(ruta_archivo)
-    ws = wb.active
+    nombres_unicos = df['Nombre'].unique()
 
-    # Formato encabezado
-    header_fill = PatternFill(start_color="177086", end_color="177086", fill_type="solid")
-    header_border = Border(
-        left=Side(style="thin", color="177086"),
-        right=Side(style="thin", color="177086"),
-        top=Side(style="thin", color="177086"),
-        bottom=Side(style="thin", color="177086")
-    )
+    for nombre in nombres_unicos:
+        df_persona = df[df['Nombre'] == nombre]
+        nombre_archivo = f"{nombre.replace(' ', '_')}_{mes}.xlsx"
+        ruta_archivo = os.path.join(output_dir, nombre_archivo)
 
-    for cell in ws[1]:
-        cell.fill = header_fill
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.alignment = Alignment(horizontal="center")
-        cell.border = header_border
+        df_persona.to_excel(ruta_archivo, index=False)
+        wb = load_workbook(ruta_archivo)
+        ws = wb.active
 
-    # Formato moneda columna "Pesos" (columna E)
-    for row in ws.iter_rows(min_row=2, min_col=5, max_col=5):
-        for cell in row:
+        # Estilos de encabezado
+        header_fill = PatternFill(start_color="177086", end_color="177086", fill_type="solid")
+        header_border = Border(
+            left=Side(style="thin", color="177086"),
+            right=Side(style="thin", color="177086"),
+            top=Side(style="thin", color="177086"),
+            bottom=Side(style="thin", color="177086")
+        )
+
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.alignment = Alignment(horizontal="center")
+            cell.border = header_border
+
+        # Formato de columnas de pesos y dólares
+        for row in ws.iter_rows(min_row=2, min_col=5, max_col=5):
+            for cell in row:
+                cell.number_format = FORMAT_CURRENCY_USD_SIMPLE
+
+        for row in ws.iter_rows(min_row=2, min_col=6, max_col=6):
+            for cell in row:
+                cell.number_format = '"USD" #,##0.00'
+
+        # Fórmulas de totales
+        ultima_fila = ws.max_row + 1
+        ws[f'E{ultima_fila}'] = f"=SUM(E2:E{ultima_fila - 1})"
+        ws[f'F{ultima_fila}'] = f"=SUM(F2:F{ultima_fila - 1})"
+
+        for col in ['E', 'F']:
+            cell = ws[f'{col}{ultima_fila}']
+            cell.font = Font(bold=True, color="444444")
+            cell.fill = PatternFill(start_color="e3e8ea", end_color="e3e8ea", fill_type="solid")
             cell.number_format = FORMAT_CURRENCY_USD_SIMPLE
+            cell.alignment = Alignment(horizontal="center")
+            cell.border = Border(top=Side(style="medium", color="222222"))
 
-    # Formato moneda columna "Dólares" (columna F)
-    for row in ws.iter_rows(min_row=2, min_col=6, max_col=6):
-        for cell in row:
-            cell.number_format = '"USD" #,##0.00'
+        wb.save(ruta_archivo)
 
-    # Agregar totales al final
-    ultima_fila = ws.max_row + 1
-    ws[f'E{ultima_fila}'] = f"=SUM(E2:E{ultima_fila - 1})"
-    ws[f'F{ultima_fila}'] = f"=SUM(F2:F{ultima_fila - 1})"
+# Generar archivo combinado general
+if meses_creados:
+    print("Se generaron los siguientes meses:", ", ".join(meses_creados))
 
-    # Formato totales
-    for col in ['E', 'F']:
-        cell = ws[f'{col}{ultima_fila}']
-        cell.font = Font(bold=True, color="444444")
-        cell.fill = PatternFill(start_color="e3e8ea", end_color="e3e8ea", fill_type="solid")
-        cell.number_format = FORMAT_CURRENCY_USD_SIMPLE
-        cell.alignment = Alignment(horizontal="center")
-        cell.border = Border(top=(Side(style="medium", color="222222")))
+    salida_path = 'movimientos_totales_2025.csv'
+    archivos = [f for f in os.listdir(crudos_dir) if f.startswith("movimientos_") and f.endswith(".csv")]
 
-    # Guardar archivo final
-    wb.save(ruta_archivo)
+    dataframes = []
+    for archivo in archivos:
+        ruta = os.path.join(crudos_dir, archivo)
+        df = pd.read_csv(ruta)
+        df["Fecha"] = pd.to_datetime(df["Fecha"], dayfirst=True, errors="coerce")  # Asegurar formato uniforme
+        dataframes.append(df)
 
-print("Archivos Excel individuales generados con formato, bordes y totales.")
+    df_total = pd.concat(dataframes, ignore_index=True)
+    df_total.to_csv(salida_path, index=False)
+
+    print(f"Archivo combinado actualizado: {salida_path}")
+else:
+    print("Todos los meses ya estaban procesados. No se creó ningún archivo nuevo.")
